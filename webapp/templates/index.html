@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VBT tracking — debug</title>
+<style>
+  :root { --bg:#0f1115; --panel:#181b22; --line:#2a2f3a; --fg:#e6e9ef;
+          --muted:#8b93a7; --accent:#22c55e; --accent2:#3b82f6; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui,sans-serif; background:var(--bg);
+         color:var(--fg); }
+  header { padding:16px 24px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:4px 0 0; color:var(--muted); }
+  main { max-width:1100px; margin:0 auto; padding:24px; }
+  .panel { background:var(--panel); border:1px solid var(--line);
+           border-radius:12px; padding:18px; margin-bottom:20px; }
+  .panel h2 { margin:0 0 12px; font-size:15px; }
+  label { display:block; color:var(--muted); margin:10px 0 4px; }
+  input[type=file], select { width:100%; padding:8px; background:#0f1115;
+    color:var(--fg); border:1px solid var(--line); border-radius:8px; }
+  video { width:100%; border-radius:8px; background:#000; display:block; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; }
+  .col { flex:1 1 320px; }
+  .trim { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; }
+  .trim .field { flex:1 1 140px; }
+  .num { width:100%; padding:8px; background:#0f1115; color:var(--fg);
+         border:1px solid var(--line); border-radius:8px; }
+  button { cursor:pointer; border:none; border-radius:8px; padding:9px 14px;
+           font-weight:600; color:#fff; background:var(--accent2); }
+  button.ghost { background:#222732; }
+  button.go { background:var(--accent); color:#06210f; font-size:15px;
+              padding:12px 20px; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .hint { color:var(--muted); font-size:12px; }
+  .stats { color:var(--muted); font-size:13px; margin-top:10px; }
+  .stats b { color:var(--fg); }
+  #status { margin-top:12px; min-height:20px; }
+  .err { color:#f87171; }
+  .ok { color:var(--accent); }
+  .spin { display:inline-block; width:14px; height:14px; border:2px solid var(--muted);
+          border-top-color:var(--accent); border-radius:50%; vertical-align:-2px;
+          animation:spin .8s linear infinite; margin-right:6px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .hidden { display:none; }
+  .caption { margin:8px 0 0; font-size:13px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
+  th, td { padding:7px 10px; text-align:right; border-bottom:1px solid var(--line); }
+  th:first-child, td:first-child { text-align:left; }
+  th { color:var(--muted); font-weight:600; }
+  tr.best td { color:var(--accent); font-weight:600; }
+  details summary::-webkit-details-marker { color:var(--muted); }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%;
+         background:var(--accent); vertical-align:-1px; margin-right:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VBT tracking — debug & visualisation</h1>
+  <p>Import a clip → trim it → track. Outputs save to <code>data/tracked/&lt;date&gt;/</code>.</p>
+</header>
+
+<main>
+  <!-- 1. Import + trim -->
+  <section class="panel">
+    <h2>1 · Import & trim</h2>
+    <label for="file">Video file</label>
+    <input id="file" type="file" accept="video/*">
+
+    <div id="player" class="hidden" style="margin-top:14px;">
+      <video id="preview" controls></video>
+      <div class="trim" style="margin-top:14px;">
+        <div class="field">
+          <label>Start (s)</label>
+          <input id="start" class="num" type="number" min="0" step="0.01" value="0">
+        </div>
+        <button class="ghost" id="setStart" type="button">⟵ Set start to playhead</button>
+        <div class="field">
+          <label>End (s)</label>
+          <input id="end" class="num" type="number" min="0" step="0.01" value="0">
+        </div>
+        <button class="ghost" id="setEnd" type="button">Set end to playhead ⟶</button>
+      </div>
+      <p class="hint" id="dur"></p>
+    </div>
+  </section>
+
+  <!-- 2. Track -->
+  <section class="panel">
+    <h2>2 · Track</h2>
+    <div class="row">
+      <div class="col">
+        <label for="model">Model weights</label>
+        <select id="model">
+          {% for m in models %}
+          <option value="{{ m }}" {% if m == default_model %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col">
+        <label for="conf">Min confidence</label>
+        <input id="conf" class="num" type="number" min="0" max="1" step="0.05" value="0.25">
+      </div>
+      <div class="col">
+        <label for="plate">Largest plate on bar (calibration)</label>
+        <select id="plate">
+          {% for kg in ["25", "20", "15", "10", "5", "2.5"] %}
+          <option value="{{ kg }}" {% if kg == "20" %}selected{% endif %}>{{ kg }} kg — {{ plate_config[kg]|round(0)|int }} mm</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col">
+        <label for="trailStyle">Trail style</label>
+        <select id="trailStyle">
+          <option value="green" selected>Green only</option>
+          <option value="phase">Phase colors — green up · orange down · grey idle</option>
+        </select>
+      </div>
+      <div class="col">
+        <label for="repStyle">Rep structure</label>
+        <select id="repStyle">
+          <option value="auto" selected>Auto — detect from first movement</option>
+          <option value="down-first">Eccentric first — squat, bench…</option>
+          <option value="up-first">Concentric first — deadlift, row…</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:16px;">
+      <button class="go" id="run" type="button" disabled>▶ Start tracking</button>
+    </div>
+    <div id="status"></div>
+  </section>
+
+  <!-- Plate settings -->
+  <section class="panel">
+    <details>
+      <summary style="cursor:pointer; font-weight:600;">⚙ Plate diameters (mm) — measure your plates once, save</summary>
+      <div class="row" style="margin-top:12px;">
+        {% for kg in ["25", "20", "15", "10", "5", "2.5"] %}
+        <div class="field" style="flex:1 1 100px;">
+          <label for="plate-{{ kg }}">{{ kg }} kg</label>
+          <input id="plate-{{ kg }}" class="num plate-mm" data-kg="{{ kg }}"
+                 type="number" min="50" max="600" step="1"
+                 value="{{ plate_config[kg]|round(0)|int }}">
+        </div>
+        {% endfor %}
+      </div>
+      <div style="margin-top:12px;">
+        <button class="ghost" id="savePlates" type="button">Save plate sizes</button>
+        <span id="plateStatus" class="hint"></span>
+      </div>
+    </details>
+  </section>
+
+  <!-- 3. Results -->
+  <section class="panel hidden" id="results">
+    <h2>3 · Previews</h2>
+    <div class="row">
+      <div class="col">
+        <video id="boxedVid" controls loop></video>
+        <p class="caption"><span class="dot" style="background:#3b82f6"></span>
+           <b>Boxed track</b> — detector + custom Kalman tracker (primary in green).</p>
+      </div>
+      <div class="col">
+        <video id="barpathVid" controls loop></video>
+        <p class="caption"><span class="dot"></span>
+           <b>Bar path</b> — smoothed trail + live rep/velocity HUD.</p>
+      </div>
+    </div>
+    <p class="stats" id="resultStats"></p>
+  </section>
+
+  <!-- 4. Reps & velocity -->
+  <section class="panel hidden" id="analysisPanel">
+    <h2>4 · Reps & velocity</h2>
+    <p class="stats" id="analysisSummary"></p>
+    <div id="analysisBody">
+      <table id="repTable">
+        <thead>
+          <tr><th>Rep</th><th>Duration (s)</th><th>ROM (m)</th>
+              <th>Mean conc. (m/s)</th><th>Peak conc. (m/s)</th>
+              <th>Mean ecc. (m/s)</th><th>Peak ecc. (m/s)</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <canvas id="velChart" height="240" style="width:100%; margin-top:16px;"></canvas>
+      <p class="hint">Instantaneous vertical bar velocity (positive = up). Shaded bands: green = concentric, orange = eccentric.</p>
+    </div>
+    <p class="err hidden" id="analysisWarn"></p>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const fileEl = $("file"), video = $("preview"), player = $("player");
+const startEl = $("start"), endEl = $("end"), runBtn = $("run");
+const statusEl = $("status"), results = $("results");
+
+let objectUrl = null;
+
+fileEl.addEventListener("change", () => {
+  const f = fileEl.files[0];
+  if (!f) return;
+  if (objectUrl) URL.revokeObjectURL(objectUrl);
+  objectUrl = URL.createObjectURL(f);
+  video.src = objectUrl;
+  player.classList.remove("hidden");
+  runBtn.disabled = false;
+  statusEl.innerHTML = "";
+});
+
+video.addEventListener("loadedmetadata", () => {
+  endEl.value = video.duration.toFixed(2);
+  startEl.max = endEl.max = video.duration.toFixed(2);
+  $("dur").textContent = `Duration: ${video.duration.toFixed(2)} s`;
+});
+
+$("setStart").addEventListener("click", () => startEl.value = video.currentTime.toFixed(2));
+$("setEnd").addEventListener("click", () => endEl.value = video.currentTime.toFixed(2));
+
+runBtn.addEventListener("click", async () => {
+  const f = fileEl.files[0];
+  if (!f) return;
+  const start = parseFloat(startEl.value) || 0;
+  const end = parseFloat(endEl.value) || 0;
+  if (end > 0 && end <= start) {
+    statusEl.innerHTML = `<span class="err">End must be greater than start.</span>`;
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append("video", f);
+  fd.append("start", start);
+  fd.append("end", end);
+  fd.append("model", $("model").value);
+  fd.append("conf", $("conf").value);
+  fd.append("plate", $("plate").value);
+  fd.append("trail_style", $("trailStyle").value);
+  fd.append("rep_style", $("repStyle").value);
+
+  runBtn.disabled = true;
+  statusEl.innerHTML = `<span class="spin"></span>Trimming & tracking… (this runs the model frame-by-frame, give it a moment)`;
+  results.classList.add("hidden");
+
+  try {
+    const resp = await fetch("/track", { method: "POST", body: fd });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "Tracking failed.");
+
+    const bust = "?t=" + Date.now();   // dodge the cache between runs
+    $("boxedVid").src = data.boxed_url + bust;
+    $("barpathVid").src = data.barpath_url + bust;
+    results.classList.remove("hidden");
+    $("resultStats").innerHTML =
+      `Saved to <b>${data.saved_dir}/</b> — ${data.boxed_name}, ${data.barpath_name}, ${data.csv_name}, ${data.metrics_name}.<br>` +
+      `fps <b>${data.fps}</b> · frames <b>${data.n_frames}</b> · box coverage <b>${data.coverage}%</b> · track ids <b>${JSON.stringify(data.track_ids)}</b>`;
+    renderAnalysis(data.analysis);
+    statusEl.innerHTML = `<span class="ok">✓ Done.</span>`;
+  } catch (e) {
+    statusEl.innerHTML = `<span class="err">✗ ${e.message}</span>`;
+  } finally {
+    runBtn.disabled = false;
+  }
+});
+
+/* ---------- Plate size settings ---------- */
+$("savePlates").addEventListener("click", async () => {
+  const cfg = {};
+  document.querySelectorAll(".plate-mm").forEach(el => cfg[el.dataset.kg] = parseFloat(el.value));
+  const st = $("plateStatus");
+  try {
+    const resp = await fetch("/plate-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfg),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "Save failed.");
+    // Refresh the calibration dropdown labels with the new diameters.
+    document.querySelectorAll("#plate option").forEach(opt => {
+      opt.textContent = `${opt.value} kg — ${Math.round(data[opt.value])} mm`;
+    });
+    st.innerHTML = `<span class="ok">✓ saved</span>`;
+  } catch (e) {
+    st.innerHTML = `<span class="err">✗ ${e.message}</span>`;
+  }
+});
+
+/* ---------- Reps & velocity rendering ---------- */
+let lastAnalysis = null;
+
+function renderAnalysis(a) {
+  lastAnalysis = a;
+  const panel = $("analysisPanel"), warn = $("analysisWarn"), body = $("analysisBody");
+  panel.classList.remove("hidden");
+  if (!a || !a.calibrated) {
+    body.classList.add("hidden");
+    warn.classList.remove("hidden");
+    warn.textContent = "Not enough confident detections to calibrate — no velocity metrics for this clip.";
+    $("analysisSummary").innerHTML = "";
+    return;
+  }
+  warn.classList.add("hidden");
+  body.classList.remove("hidden");
+
+  const s = a.summary || {};
+  const mmPerPx = (a.m_per_px * 1000).toFixed(2);
+  const styleLabel = { "down-first": "eccentric→concentric (squat-style)",
+                       "up-first": "concentric→eccentric (deadlift-style)" }[a.rep_style] || "—";
+  let html =
+    `Reps <b>${a.rep_count}</b> · Structure <b>${styleLabel}</b>` +
+    (s.avg_mcv != null ? ` · Avg MCV <b>${s.avg_mcv} m/s</b> · Best <b>${s.best_mcv}</b> · Last <b>${s.last_mcv}</b> · Velocity loss <b>${s.velocity_loss_pct}%</b>` : "") +
+    `<br>Calibration: plate <b>${a.plate_diameter_mm} mm</b> ≈ <b>${a.plate_size_px} px</b> → <b>${mmPerPx} mm/px</b>`;
+  $("analysisSummary").innerHTML = html;
+
+  const tbody = document.querySelector("#repTable tbody");
+  tbody.innerHTML = "";
+  const best = Math.max(...a.reps.map(r => r.mean_concentric_v), -Infinity);
+  for (const r of a.reps) {
+    const tr = document.createElement("tr");
+    if (r.mean_concentric_v === best) tr.className = "best";
+    tr.innerHTML = `<td>${r.rep}</td><td>${r.duration_s.toFixed(2)}</td>` +
+      `<td>${r.rom_m.toFixed(2)}</td><td>${r.mean_concentric_v.toFixed(2)}</td>` +
+      `<td>${r.peak_concentric_v.toFixed(2)}</td><td>${r.mean_eccentric_v.toFixed(2)}</td>` +
+      `<td>${r.peak_eccentric_v.toFixed(2)}</td>`;
+    tbody.appendChild(tr);
+  }
+  document.querySelector("#repTable").classList.toggle("hidden", a.reps.length === 0);
+  drawVelocityChart($("velChart"), a);
+}
+
+function drawVelocityChart(canvas, a) {
+  const t = a.series.t, v = a.series.v, phase = a.series.phase, rep = a.series.rep;
+  if (!t || t.length < 2) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth, H = 240;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+
+  const padL = 44, padR = 10, padT = 22, padB = 24;
+  const t0 = t[0], t1 = t[t.length - 1];
+  let vMin = Math.min(0, ...v), vMax = Math.max(0, ...v);
+  const span = (vMax - vMin) || 1;
+  vMin -= span * 0.08; vMax += span * 0.08;
+  const X = tt => padL + (tt - t0) / (t1 - t0 || 1) * (W - padL - padR);
+  const Y = vv => padT + (vMax - vv) / (vMax - vMin) * (H - padT - padB);
+
+  // Phase bands.
+  const bandColor = { up: "rgba(34,197,94,.13)", down: "rgba(249,115,22,.13)" };
+  let i = 0;
+  while (i < t.length) {
+    let j = i;
+    while (j + 1 < t.length && phase[j + 1] === phase[i]) j++;
+    if (bandColor[phase[i]]) {
+      ctx.fillStyle = bandColor[phase[i]];
+      ctx.fillRect(X(t[i]), padT, Math.max(X(t[j]) - X(t[i]), 1), H - padT - padB);
+    }
+    i = j + 1;
+  }
+
+  // Rep numbers along the top (at each rep's midpoint).
+  ctx.fillStyle = "#8b93a7"; ctx.font = "11px system-ui"; ctx.textAlign = "center";
+  const seen = new Set();
+  for (let k = 0; k < t.length; k++) {
+    if (rep[k] > 0 && !seen.has(rep[k])) {
+      seen.add(rep[k]);
+      let kEnd = k;
+      while (kEnd + 1 < t.length && rep[kEnd + 1] === rep[k]) kEnd++;
+      ctx.fillText(`R${rep[k]}`, X((t[k] + t[kEnd]) / 2), padT - 8);
+    }
+  }
+
+  // Axes: zero line + y ticks.
+  ctx.strokeStyle = "#2a2f3a"; ctx.lineWidth = 1;
+  ctx.textAlign = "right";
+  const step = niceStep((vMax - vMin) / 5);
+  for (let vv = Math.ceil(vMin / step) * step; vv <= vMax; vv += step) {
+    const y = Y(vv);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+    ctx.fillText(vv.toFixed(Math.abs(step) < 0.1 ? 2 : 1), padL - 6, y + 3);
+  }
+  ctx.strokeStyle = "#8b93a7"; ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(padL, Y(0)); ctx.lineTo(W - padR, Y(0)); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // x ticks each second.
+  ctx.textAlign = "center";
+  const tStep = (t1 - t0) > 20 ? 5 : 1;
+  for (let tt = Math.ceil(t0); tt <= t1; tt += tStep)
+    ctx.fillText(`${tt}s`, X(tt), H - 6);
+
+  // Velocity polyline.
+  ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  for (let k = 0; k < t.length; k++)
+    k === 0 ? ctx.moveTo(X(t[k]), Y(v[k])) : ctx.lineTo(X(t[k]), Y(v[k]));
+  ctx.stroke();
+
+  // y-axis label.
+  ctx.save();
+  ctx.translate(11, H / 2); ctx.rotate(-Math.PI / 2);
+  ctx.fillText("m/s", 0, 0);
+  ctx.restore();
+}
+
+function niceStep(raw) {
+  const mag = Math.pow(10, Math.floor(Math.log10(raw || 1)));
+  for (const m of [1, 2, 5, 10]) if (raw <= m * mag) return m * mag;
+  return 10 * mag;
+}
+
+window.addEventListener("resize", () => {
+  if (lastAnalysis && lastAnalysis.calibrated) drawVelocityChart($("velChart"), lastAnalysis);
+});
+</script>
+</body>
+</html>
