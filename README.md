@@ -1,46 +1,84 @@
 # VBT Training Project
 
-Barbell-plate detection & tracking for velocity-based training (VBT). The
-pipeline goes: **raw video → normalized clips → Label Studio annotations →
-YOLO dataset → trained detector → tracking + velocity**.
+Barbell-plate detection & tracking for **velocity-based training (VBT)**. A phone
+video of a lift becomes per-rep velocity metrics: detect the plate, track the
+camera-side plate through the lift, calibrate pixels→metres from the known plate
+diameter, segment reps and compute mean/peak concentric velocity and
+velocity-loss %.
 
-## Layout
+> **New here?** Read [`CLAUDE.md`](CLAUDE.md) for the architecture at a glance and
+> [`tech_stack.md`](tech_stack.md) for the full pipeline / model audit.
+
+## Architecture
+
+The computer-vision **engine** and the **web UI** are separate:
+
+- **`vbt_core/`** — the UI-agnostic, unit-tested, pip-installable engine. All
+  detection, tracking, analysis, rendering and config logic lives here.
+  - `detection/` — `Detector` ABC + `YOLODetector` (Ultralytics YOLO11n). The
+    `Detector` interface is the extension point for new backends.
+  - `tracking/` — `KalmanFilter`, IoU/Hungarian/Mahalanobis `association`,
+    `BarTracker` (two-stage ByteTrack-style).
+  - `analysis/` — calibration, `RepCounter`, velocity, trajectory metrics.
+  - `rendering/` — ffmpeg encode/trim + overlay drawing.
+  - `pipeline/` — `TrackingPipeline` (OOP) + `run_tracking()` wrapper.
+  - `config/` — persisted plate diameters.
+- **`webapp/`** — UI only. A thin Flask app (`app.py`) that delegates to
+  `vbt_core`, plus the "VBT Studio" frontend (`templates/` + `static/`).
 
 ```
 vbt_training_project/
-├── data/
-│   ├── raw/                     # DROP ZONE: drop any video here, then run normalize_videos.sh
-│   ├── processed/<date>/        # normalized 1080p / 30fps / H.264 clips (training source)
-│   ├── archive/<date>/          # original untouched captures (auto-archived from raw/)
-│   ├── annotations/<date>.json  # Label Studio exports (full JSON)
-│   ├── datasets/<name>/         # YOLO datasets built from annotations (images/ labels/ data.yaml)
-│   └── tracked/<date>/          # tracking outputs: annotated *_tracked.mp4 + *_track.csv
-├── scripts/
-│   ├── normalize_videos.sh      # raw → processed, AMD GPU (VAAPI) encode
-│   ├── ls_to_yolo.py            # annotations → YOLO dataset (interpolates keyframes)
-│   ├── train_colab.py           # bombproof, resumable YOLO11 training (run on Colab)
-│   └── track_and_velocity.py    # run the detector + tracker on a clip
-├── webapp/                      # small Flask debug UI: import → trim → track → preview
-├── mobile/                      # self-contained React Native app (on-device tracking) — see mobile/README.md
-├── models/                      # trained weights (best.pt) live here
-├── papers/                      # reference material
-└── venv/                        # Python environment (label-studio, opencv, ...)
+├── vbt_core/      # the engine (detection / tracking / analysis / rendering / pipeline / config)
+├── webapp/        # thin Flask UI + static frontend (no CV logic)
+├── scripts/       # offline data-prep & training CLIs (normalize, ls_to_yolo, train, track)
+├── models/        # trained weights (plate_best.pt default, best.pt); exports gitignored
+├── tests/         # pytest suite
+├── pyproject.toml # packaging (vbt-core) + pytest config
+├── CLAUDE.md      # orientation guide
+└── tech_stack.md  # full pipeline / model / tech-stack audit
 ```
 
-Dates use ISO format `YYYY-MM-DD` so folders sort chronologically.
+`data/` (raw/processed/datasets/tracked clips, annotations, runtime
+`plate_config.json`) is **local-only and gitignored** — it is never committed.
+Dates use ISO `YYYY-MM-DD` so session folders sort chronologically.
 
-## Workflow
+## Setup
 
-**1. Normalize new footage** — drop clips in `data/raw/`, then:
+The Python environment lives in `venv/` (ultralytics, torch-cpu, scipy, opencv,
+flask). The engine is installed editable:
+
+```bash
+venv/bin/pip install -e .          # makes `import vbt_core` work
+```
+
+## Run the web UI
+
+```bash
+venv/bin/python webapp/app.py      # then open http://127.0.0.1:5000
+```
+
+Import a clip, scrub + set trim in/out points, pick the model and plate weight,
+hit **Start tracking**. It returns two previews — the **boxed track** and a
+**bar-path** view with a live HUD — and saves both videos + the trajectory CSV +
+metrics JSON to `data/tracked/<date>/`.
+
+## Tests
+
+```bash
+venv/bin/python -m pytest          # testpaths = tests/
+```
+
+## Offline data & training workflow
+
+**1. Normalize footage** — drop clips in `data/raw/`, then:
 ```bash
 bash scripts/normalize_videos.sh            # uses today's date
 bash scripts/normalize_videos.sh 2026-06-10 # or a specific session date
 ```
 Output lands in `data/processed/<date>/`; originals move to `data/archive/<date>/`.
 
-**2. Annotate** in Label Studio — import the clips from `data/processed/<date>/`,
-draw + interpolate plate boxes, then **Export → JSON** into
-`data/annotations/<date>.json`.
+**2. Annotate** in Label Studio — import from `data/processed/<date>/`, draw +
+interpolate plate boxes, then **Export → JSON** into `data/annotations/<date>.json`.
 
 **3. Build the YOLO dataset** (interpolates keyframes to per-frame labels):
 ```bash
@@ -50,27 +88,14 @@ venv/bin/python scripts/ls_to_yolo.py \
   --out    data/datasets/plate_v1
 ```
 
-**4. Train** on Colab (T4 GPU). Upload `data/datasets/plate_v1.zip` + `scripts/train_colab.py`
-to Drive, then in a notebook run `!python train_colab.py`. It saves to Drive and
-auto-resumes if you get timed out. Drop the resulting `best.pt` into `models/`.
+**4. Train** on Colab/Kaggle (T4 GPU), then drop the resulting `best.pt` into `models/`.
 
-**5. Track / evaluate** a held-out clip:
+**5. Track / evaluate** a held-out clip from the CLI:
 ```bash
 venv/bin/python scripts/track_and_velocity.py \
   --weights models/best.pt \
   --source  data/processed/2026-06-10/video_3.mp4
 ```
-(velocity stage TBD — tracking + trajectory CSV are implemented.)
-
-**Debug webapp** — a browser UI for the same tracking, handy for eyeballing
-results without the CLI:
-```bash
-venv/bin/python webapp/app.py     # then open http://127.0.0.1:5000
-```
-Import a clip, scrub + set trim in/out points, pick the model, hit **Start
-tracking**. It returns two previews — the **boxed track** and a **bar-path**
-view (a sticky green trail through the plate centre) — and saves both videos +
-the trajectory CSV to `data/tracked/<date>/`, same naming as the CLI.
 
 ## Notes
 - One class: `plate`. Datasets are versioned by folder name (`plate_v1`, `plate_v2`, ...).
