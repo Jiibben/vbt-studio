@@ -1,24 +1,20 @@
 #!/usr/bin/env python3
 """
-app.py  —  small Flask debug webapp for the VBT tracking pipeline.
+app.py — thin Flask UI for the VBT tracking pipeline.
 
-Flow in the browser:
-  1. Import a video.
-  2. Scrub + set trim in/out points.
-  3. Pick the model, hit "Start tracking".
-  4. Server trims the clip (ffmpeg), runs the detector+tracker once, and returns
-     TWO previews:
-       - the boxed track
-       - the bar-path track (sticky green centre trail)
-  5. Both previews + the trajectory CSV are saved under data/tracked/<date>/.
+This module is *only* the web layer: HTTP routing, file upload, request
+validation, and serving results. Every piece of computer vision — detection,
+tracking, calibration, rep/velocity analysis, rendering — lives in the
+`vbt_core` package and is reached through `run_tracking`. Swapping or extending
+the engine never touches this file.
 
 Run:
-    venv/bin/python webapp/app.py
-    # then open http://127.0.0.1:5000
+    venv/bin/python webapp/app.py    # then open http://127.0.0.1:5000
 """
 from __future__ import annotations
 
 import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -26,10 +22,13 @@ from flask import (Flask, abort, jsonify, render_template, request,
                    send_from_directory, url_for)
 from werkzeug.utils import secure_filename
 
-from plate_config import load_plate_config, save_plate_config
-from tracking import run_tracking
-
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))   # allow running without `pip install -e .`
+
+from vbt_core import load_plate_config, run_tracking, save_plate_config
+from vbt_core.rendering import trim_clip
+
 MODELS_DIR = ROOT / "models"
 TRACKED_DIR = ROOT / "data" / "tracked"
 UPLOAD_DIR = Path(__file__).resolve().parent / "_uploads"
@@ -43,17 +42,12 @@ def list_models() -> list[str]:
     return sorted(p.name for p in MODELS_DIR.glob("*.pt"))
 
 
-def trim_clip(src: Path, dst: Path, start: float, end: float) -> None:
-    """Re-encode the [start, end] slice of `src` into `dst` (frame-accurate)."""
-    duration = max(0.0, end - start)
-    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src)]
-    if start > 0:
-        cmd += ["-ss", f"{start}"]
-    if duration > 0:
-        cmd += ["-t", f"{duration}"]
-    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-an",
-            "-movflags", "+faststart", str(dst)]
-    subprocess.run(cmd, check=True)
+def _default_model() -> str:
+    models = list_models()
+    for preferred in ("plate_best.pt", "best.pt"):
+        if preferred in models:
+            return preferred
+    return models[0] if models else ""
 
 
 @app.route("/")
@@ -74,14 +68,6 @@ def plate_config_post():
         return jsonify(save_plate_config(request.get_json(force=True)))
     except (ValueError, TypeError) as exc:
         return jsonify(error=str(exc)), 400
-
-
-def _default_model() -> str:
-    models = list_models()
-    for preferred in ("plate_best.pt", "best.pt"):
-        if preferred in models:
-            return preferred
-    return models[0] if models else ""
 
 
 @app.route("/track", methods=["POST"])
