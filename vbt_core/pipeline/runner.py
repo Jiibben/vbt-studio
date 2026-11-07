@@ -61,6 +61,16 @@ def _read_fps(source: Path) -> float:
     return fps
 
 
+def _read_frame_count(source: Path) -> int:
+    """Best-effort total frame count for progress reporting (0 if unknown)."""
+    cap = cv2.VideoCapture(str(source))
+    if not cap.isOpened():
+        return 0
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    cap.release()
+    return max(n, 0)
+
+
 class TrackingPipeline:
     """Run a `Detector` + `BarTracker` + analysis over a clip and render outputs.
 
@@ -81,7 +91,10 @@ class TrackingPipeline:
         self.trail_thickness = trail_thickness
 
     def run(self, source, out_boxed, out_barpath, out_csv,
-            out_metrics) -> TrackResult:
+            out_metrics, *, progress_cb=None) -> TrackResult:
+        """``progress_cb(fraction)``, if given, is called once per frame with the
+        fraction of the clip processed (0..1) — used by batch runs for live
+        per-clip progress. Optional and cheap; omit it for the single-clip path."""
         source = Path(source)
         out_boxed, out_barpath = Path(out_boxed), Path(out_barpath)
         out_csv, out_metrics = Path(out_csv), Path(out_metrics)
@@ -89,6 +102,7 @@ class TrackingPipeline:
             p.parent.mkdir(parents=True, exist_ok=True)
 
         fps = _read_fps(source)
+        total_frames = _read_frame_count(source) if progress_cb is not None else 0
         tracker = BarTracker(
             high_thresh=max(self.conf, 0.15),
             low_thresh=0.10,
@@ -174,11 +188,14 @@ class TrackingPipeline:
 
             draw_trail(barpath, trail, rep_counter.phase_at, self.trail_style,
                        self.trail_thickness)
-            draw_hud(barpath, rep_counter.rep_count, v_live, rep_counter.state)
+            draw_hud(barpath, rep_counter.live_rep_count, v_live,
+                     rep_counter.state)
 
             boxed_writer.write(boxed)
             barpath_writer.write(barpath)
             n_frames += 1
+            if progress_cb is not None and total_frames:
+                progress_cb(min(n_frames / total_frames, 1.0))
 
         if boxed_writer is not None:
             boxed_writer.close()

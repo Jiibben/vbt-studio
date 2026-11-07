@@ -40,14 +40,19 @@ vbt_training_project/
 │   │   ├── ffmpeg.py          # FFmpegWriter + trim_clip (libx264 yuv420p faststart)
 │   │   └── overlay.py         # draw_box / draw_hud / draw_trail (+ COLOR_* constants)
 │   ├── pipeline/
-│   │   └── runner.py          # TrackingPipeline (orchestrator) + run_tracking() wrapper + TrackResult
+│   │   ├── runner.py          # TrackingPipeline (orchestrator) + run_tracking() wrapper + TrackResult
+│   │   └── batch.py           # run_batch() — load YOLO once, process many clips, per-clip callbacks/error-isolation
 │   ├── config/
 │   │   └── plate_config.py    # load/save_plate_config → data/plate_config.json (env VBT_PLATE_CONFIG)
 │   └── __init__.py            # public API: run_tracking, TrackingPipeline, YOLODetector, Detector, ...
 ├── webapp/                    # UI ONLY — no CV logic lives here
-│   ├── app.py                 # thin Flask: routing, upload, validation; delegates to vbt_core.run_tracking
-│   ├── templates/index.html   # page markup
-│   └── static/css/styles.css, static/js/app.js   # "VBT Studio" frontend, vanilla JS + <canvas> velocity chart
+│   ├── app.py                 # thin Flask: single-clip /track, /plate-config, /media; registers batch_bp
+│   ├── batch.py               # BULK IMPORT: session manifests (manifest.json per data/tracked/<sid>/), in-process
+│   │                          #   worker thread + queue, /sessions CRUD + upload + /process; calls vbt_core.run_batch
+│   ├── templates/index.html   # single-clip page;  templates/batch.html — bulk-import "sessions" page
+│   └── static/css/styles.css, static/js/{app.js, batch.js, analysis-view.js}
+│                              #   "VBT Studio" frontend; analysis-view.js (window.VBT) renders rep table + <canvas>
+│                              #   velocity chart, shared by both pages
 ├── scripts/                   # offline data/training CLI (not used at inference time)
 │   ├── normalize_videos.sh    # raw → processed (ffmpeg, 1080p/30fps/H.264)
 │   ├── ls_to_yolo.py          # Label Studio export → YOLO dataset (interpolates keyframes)

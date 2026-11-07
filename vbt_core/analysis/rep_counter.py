@@ -15,6 +15,14 @@ the movement direction:
 The style is auto-detected from the first movement direction, or forced. No
 lookahead — usable live during the video pass; call `finalize()` after the last
 sample to close a set that ends at lockout.
+
+Two counters are exposed. `live_rep_count` ticks at **lockout** (the moment the
+concentric stops rising at the top — a small reversal OR a brief hold at the
+peak), so the burned-in video counter increments when the rep is actually
+completed, even when the lifter pauses standing at the top. It is positional, so
+a slow grind (which keeps making new peaks while it rises) counts the same as a
+fast rep. `rep_count` and the structured `reps` list are the authoritative
+post-pass results, built when phases close — unchanged by the live counter.
 """
 from __future__ import annotations
 
@@ -25,11 +33,22 @@ REP_STYLES = ("auto", "down-first", "up-first")
 class RepCounter:
     def __init__(self, *, min_displacement_m: float = 0.15,
                  min_phase_s: float = 0.25, style: str = "auto",
-                 dwell_tolerance_m: float = 0.02):
+                 dwell_tolerance_m: float = 0.02,
+                 rep_confirm_reversal_m: float = 0.05,
+                 lockout_dwell_s: float = 0.15):
         if style not in REP_STYLES:
             raise ValueError(f"Unknown rep style: {style}")
         self.min_disp = min_displacement_m
         self.min_phase_s = min_phase_s
+        # Lockout (live-tick) confirmation: the concentric is done the moment the
+        # bar STOPS rising at the top. We detect that two ways, whichever comes
+        # first: a small downward reversal from the peak (`rep_confirm_reversal`,
+        # a quick turnover into the next rep), or the bar holding the top for
+        # `lockout_dwell_s` with no new peak (a standing pause at lockout,
+        # velocity ~0). Both are positional, so a slow grind — which keeps making
+        # new peaks while it rises — never trips early; only the true top does.
+        self.rep_confirm_reversal = rep_confirm_reversal_m
+        self.lockout_dwell_s = lockout_dwell_s
         # While the bar sits within this band of an extreme (a pause at the
         # bottom, on the floor, or before the lift), the extreme's timestamp
         # keeps advancing, so the dwell attaches to the eccentric/idle side of
@@ -40,6 +59,12 @@ class RepCounter:
         self.detected_style = style if style != "auto" else None
         self.state = PHASE_IDLE
         self.rep_count = 0
+        # Live/HUD counter: ticks at lockout (the concentric turnover), one per
+        # up phase. The authoritative per-rep results live in `reps` (built when
+        # phases close) and in the post-pass analysis; this only drives the
+        # burned-in video counter so it increments at the top of each rep.
+        self.live_rep_count = 0
+        self._lockout_counted = False
         self.phases: list[dict] = []        # closed phases
         # Completed reps: {rep, start_t, end_t, conc_start, conc_end,
         #                  ecc_start, ecc_end} (ecc_* None if no eccentric).
@@ -89,10 +114,21 @@ class RepCounter:
             if self._max_y - y >= self.min_disp:
                 completed = self._enter(PHASE_UP, self._max_t, self._max_y, t, y)
         elif self.state == PHASE_UP:
-            # Strict minimum (no dwell tracking): a lockout pause must NOT
-            # extend the concentric phase.
+            # Strict minimum (no dwell tracking on the peak): a lockout pause
+            # must NOT extend the concentric phase for segmentation.
             if y < self._min_y:
                 self._min_y, self._min_t = y, t
+            # Live lockout tick: once the concentric is real (it rose past
+            # min_disp to enter UP, and lasted min_phase_s to the peak), fire the
+            # moment the bar stops rising — either it turned over by a small
+            # reversal, or it has held the top for lockout_dwell_s. Each `update`
+            # that sets a new peak resets _min_t, so this can't fire mid-ascent.
+            if (not self._lockout_counted
+                    and self._min_t - self._phase_start_t >= self.min_phase_s
+                    and (y - self._min_y >= self.rep_confirm_reversal
+                         or t - self._min_t >= self.lockout_dwell_s)):
+                self.live_rep_count += 1
+                self._lockout_counted = True
             if y - self._min_y >= self.min_disp:
                 completed = self._enter(PHASE_DOWN, self._min_t, self._min_y, t, y)
         self._last_t, self._last_y = t, y
@@ -107,6 +143,11 @@ class RepCounter:
             end_y = min(self._min_y, self._last_y)
             end_t = self._min_t if self._min_y <= self._last_y else self._last_t
             if self._phase_start_y - end_y >= self.min_disp:
+                # Set ended held at lockout: the bar never reversed enough to
+                # live-tick, so count this final rep now (once).
+                if not self._lockout_counted:
+                    self.live_rep_count += 1
+                    self._lockout_counted = True
                 completed = self._enter(PHASE_IDLE, end_t, end_y,
                                         self._last_t, self._last_y)
         elif self.state == PHASE_DOWN:
@@ -139,6 +180,8 @@ class RepCounter:
         self._phase_start_t, self._phase_start_y = boundary_t, boundary_y
         self._min_y = self._max_y = y
         self._min_t = self._max_t = t
+        if new_state == PHASE_UP:
+            self._lockout_counted = False   # arm a fresh lockout tick
         return completed
 
     def _on_phase_closed(self, phase):

@@ -28,6 +28,7 @@ if str(ROOT) not in sys.path:
 
 from vbt_core import load_plate_config, run_tracking, save_plate_config
 from vbt_core.rendering import trim_clip
+from webapp.batch import batch_bp, recover_interrupted
 
 MODELS_DIR = ROOT / "models"
 TRACKED_DIR = ROOT / "data" / "tracked"
@@ -36,6 +37,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024 * 1024  # 4 GB, debug tool
+app.register_blueprint(batch_bp)            # bulk-import (sessions) routes
 
 
 def list_models() -> list[str]:
@@ -163,4 +165,7 @@ def media(session, filename):
 
 
 if __name__ == "__main__":
+    # The background queue doesn't survive a restart; reconcile manifests so any
+    # session caught mid-process is marked 'interrupted' and can be re-run.
+    recover_interrupted()
     app.run(host="127.0.0.1", port=5000, debug=True)

@@ -9,8 +9,7 @@
      3. Confidence slider
      4. Track submission
      5. Plate-config editor
-     6. Results / summary / rep table
-     7. Velocity chart (canvas, faithful port)
+     6. Results — delegates to window.VBT (static/js/analysis-view.js)
    ========================================================================= */
 
 (function () {
@@ -18,8 +17,6 @@
 
   /* ------------------------------- 1. Helpers ------------------------------ */
   const $ = (id) => document.getElementById(id);
-  const css = (name) =>
-    getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
   const fileEl   = $("file");
   const video    = $("preview");
@@ -126,7 +123,10 @@
         `box coverage <b>${data.coverage}%</b> · ` +
         `track ids <b>${JSON.stringify(data.track_ids)}</b>`;
 
-      renderAnalysis(data.analysis);
+      lastAnalysis = data.analysis;
+      const panel = $("analysisPanel");
+      panel.classList.remove("hidden");
+      window.VBT.renderAnalysisInto(panel, data.analysis);
       setStatus('<span class="ico">&#10003;</span> Done.', "ok");
     } catch (e) {
       setStatus(`<span class="ico">&#10007;</span> ${e.message}`, "err");
@@ -168,216 +168,9 @@
     }
   });
 
-  /* -------------------- 6. Results / summary / rep table ------------------- */
-  function metricCard(k, v, unit, cls) {
-    return (
-      `<div class="metric ${cls || ""}">` +
-      `<div class="k">${k}</div>` +
-      `<div class="v">${v}<span class="u">${unit || ""}</span></div>` +
-      `</div>`
-    );
-  }
-
-  function renderAnalysis(a) {
-    lastAnalysis = a;
-    const panel = $("analysisPanel");
-    const warn = $("analysisWarn");
-    const body = $("analysisBody");
-    panel.classList.remove("hidden");
-
-    if (!a || !a.calibrated) {
-      body.classList.add("hidden");
-      warn.classList.remove("hidden");
-      warn.textContent =
-        "Not enough confident detections to calibrate — no velocity metrics for this clip.";
-      return;
-    }
-    warn.classList.add("hidden");
-    body.classList.remove("hidden");
-
-    // ---- summary metric cards ----
-    const s = a.summary || {};
-    const styleLabel =
-      {
-        "down-first": "eccentric → concentric (squat-style)",
-        "up-first": "concentric → eccentric (deadlift-style)",
-        auto: "auto-detected",
-      }[a.rep_style] || "—";
-
-    let cards =
-      metricCard("Reps", a.rep_count, "") ;
-    if (s.avg_mcv != null) {
-      cards +=
-        metricCard("Avg MCV", s.avg_mcv, " m/s", "accent") +
-        metricCard("Best MCV", s.best_mcv, " m/s", "good") +
-        metricCard("Velocity loss", s.velocity_loss_pct, "%");
-    }
-    $("summaryCards").innerHTML = cards;
-
-    // ---- calibration line ----
-    const mmPerPx = (a.m_per_px * 1000).toFixed(2);
-    $("calibLine").innerHTML =
-      `Structure <b>${styleLabel}</b>` +
-      (s.last_mcv != null ? ` · Last MCV <b>${s.last_mcv} m/s</b>` : "") +
-      ` · Calibration: plate <b>${a.plate_diameter_mm} mm</b> ` +
-      `&approx; <b>${a.plate_size_px} px</b> &rarr; <b>${mmPerPx} mm/px</b>`;
-
-    // ---- per-rep table ----
-    const tbody = document.querySelector("#repTable tbody");
-    tbody.innerHTML = "";
-    const best = Math.max(...a.reps.map((r) => r.mean_concentric_v), -Infinity);
-    for (const r of a.reps) {
-      const tr = document.createElement("tr");
-      if (r.mean_concentric_v === best) tr.className = "best";
-      tr.innerHTML =
-        `<td>${r.rep}</td><td>${r.duration_s.toFixed(2)}</td>` +
-        `<td>${r.rom_m.toFixed(2)}</td><td>${r.mean_concentric_v.toFixed(2)}</td>` +
-        `<td>${r.peak_concentric_v.toFixed(2)}</td><td>${r.mean_eccentric_v.toFixed(2)}</td>` +
-        `<td>${r.peak_eccentric_v.toFixed(2)}</td>`;
-      tbody.appendChild(tr);
-    }
-    document
-      .querySelector("#repTable")
-      .closest(".table-wrap")
-      .classList.toggle("hidden", a.reps.length === 0);
-
-    drawVelocityChart($("velChart"), a);
-  }
-
-  /* --------------------- 7. Velocity chart (canvas) ------------------------ */
-  /* Faithful port of the original hand-rolled chart, re-coloured to the
-     light palette via CSS variables. Phase bands behind the curve, rep
-     markers along the top, dpr/retina aware, axis labels, +up velocity. */
-  function drawVelocityChart(canvas, a) {
-    const t = a.series.t,
-      v = a.series.v,
-      phase = a.series.phase,
-      rep = a.series.rep;
-    if (!t || t.length < 2) return;
-
-    // palette pulled from CSS variables so it re-themes for free
-    const C = {
-      line: css("--accent") || "#2563eb",
-      grid: css("--line") || "#e6e8ec",
-      zero: css("--muted-2") || "#9aa1ad",
-      text: css("--muted") || "#6b7280",
-      bandUp: css("--phase-up-band") || "rgba(22,163,74,.10)",
-      bandDown: css("--phase-down-band") || "rgba(234,138,12,.12)",
-    };
-
-    const dpr = window.devicePixelRatio || 1;
-    const W = canvas.clientWidth,
-      H = 260;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    const ctx = canvas.getContext("2d");
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, W, H);
-
-    const padL = 46,
-      padR = 12,
-      padT = 24,
-      padB = 26;
-    const t0 = t[0],
-      t1 = t[t.length - 1];
-    let vMin = Math.min(0, ...v),
-      vMax = Math.max(0, ...v);
-    const span = vMax - vMin || 1;
-    vMin -= span * 0.08;
-    vMax += span * 0.08;
-    const X = (tt) => padL + ((tt - t0) / (t1 - t0 || 1)) * (W - padL - padR);
-    const Y = (vv) => padT + ((vMax - vv) / (vMax - vMin)) * (H - padT - padB);
-
-    // ---- phase bands ----
-    const bandColor = { up: C.bandUp, down: C.bandDown };
-    let i = 0;
-    while (i < t.length) {
-      let j = i;
-      while (j + 1 < t.length && phase[j + 1] === phase[i]) j++;
-      if (bandColor[phase[i]]) {
-        ctx.fillStyle = bandColor[phase[i]];
-        ctx.fillRect(
-          X(t[i]),
-          padT,
-          Math.max(X(t[j]) - X(t[i]), 1),
-          H - padT - padB
-        );
-      }
-      i = j + 1;
-    }
-
-    // ---- rep numbers along the top (at each rep's midpoint) ----
-    ctx.fillStyle = C.text;
-    ctx.font = "11px " + css("--font");
-    ctx.textAlign = "center";
-    const seen = new Set();
-    for (let k = 0; k < t.length; k++) {
-      if (rep[k] > 0 && !seen.has(rep[k])) {
-        seen.add(rep[k]);
-        let kEnd = k;
-        while (kEnd + 1 < t.length && rep[kEnd + 1] === rep[k]) kEnd++;
-        ctx.fillText(`R${rep[k]}`, X((t[k] + t[kEnd]) / 2), padT - 9);
-      }
-    }
-
-    // ---- y grid + ticks ----
-    ctx.strokeStyle = C.grid;
-    ctx.lineWidth = 1;
-    ctx.textAlign = "right";
-    const step = niceStep((vMax - vMin) / 5);
-    for (let vv = Math.ceil(vMin / step) * step; vv <= vMax; vv += step) {
-      const y = Y(vv);
-      ctx.beginPath();
-      ctx.moveTo(padL, y);
-      ctx.lineTo(W - padR, y);
-      ctx.stroke();
-      ctx.fillStyle = C.text;
-      ctx.fillText(vv.toFixed(Math.abs(step) < 0.1 ? 2 : 1), padL - 7, y + 3);
-    }
-
-    // ---- zero line (dashed) ----
-    ctx.strokeStyle = C.zero;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(padL, Y(0));
-    ctx.lineTo(W - padR, Y(0));
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // ---- x ticks ----
-    ctx.fillStyle = C.text;
-    ctx.textAlign = "center";
-    const tStep = t1 - t0 > 20 ? 5 : 1;
-    for (let tt = Math.ceil(t0); tt <= t1; tt += tStep)
-      ctx.fillText(`${tt}s`, X(tt), H - 7);
-
-    // ---- velocity polyline ----
-    ctx.strokeStyle = C.line;
-    ctx.lineWidth = 2;
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    for (let k = 0; k < t.length; k++)
-      k === 0 ? ctx.moveTo(X(t[k]), Y(v[k])) : ctx.lineTo(X(t[k]), Y(v[k]));
-    ctx.stroke();
-
-    // ---- y-axis label ----
-    ctx.save();
-    ctx.fillStyle = C.text;
-    ctx.translate(12, H / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.textAlign = "center";
-    ctx.fillText("m/s", 0, 0);
-    ctx.restore();
-  }
-
-  function niceStep(raw) {
-    const mag = Math.pow(10, Math.floor(Math.log10(raw || 1)));
-    for (const m of [1, 2, 5, 10]) if (raw <= m * mag) return m * mag;
-    return 10 * mag;
-  }
-
+  /* ----- 6. Results: rendering lives in window.VBT (analysis-view.js) ----- */
   window.addEventListener("resize", () => {
     if (lastAnalysis && lastAnalysis.calibrated)
-      drawVelocityChart($("velChart"), lastAnalysis);
+      window.VBT.drawVelocityChart($("velChart"), lastAnalysis);
   });
 })();

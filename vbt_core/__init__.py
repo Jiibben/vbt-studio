@@ -25,10 +25,12 @@ or, object-oriented:
 from .analysis import AnalysisResult, RepCounter, analyze_trajectory
 from .config import load_plate_config, save_plate_config
 from .detection import Detection, Detector, YOLODetector
-from .pipeline import TrackingPipeline, TrackResult, run_tracking
+from .pipeline import (BatchItem, TrackingPipeline, TrackResult, run_batch,
+                       run_tracking)
 from .tracking import BarTracker, KalmanFilter, TrackSnapshot
 
 __all__ = ["run_tracking", "TrackingPipeline", "TrackResult",
+           "run_batch", "BatchItem",
            "YOLODetector", "Detector", "Detection",
            "BarTracker", "KalmanFilter", "TrackSnapshot",
            "analyze_trajectory", "AnalysisResult", "RepCounter",

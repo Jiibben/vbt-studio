@@ -18,6 +18,10 @@
     </div>
   </div>
   <div class="header-spacer"></div>
+  <nav class="header-nav">
+    <a class="nav-link is-active" href="{{ url_for('index') }}">Single clip</a>
+    <a class="nav-link" href="{{ url_for('batch.batch_page') }}">Bulk import</a>
+  </nav>
   <span class="header-badge">Debug &amp; visualisation</span>
 </header>
 
@@ -200,12 +204,12 @@
       <span class="sub">Per-rep metrics &amp; velocity curve</span>
     </div>
     <div class="card-body">
-      <div id="analysisBody">
-        <div class="metric-grid" id="summaryCards"></div>
-        <p class="calib-line" id="calibLine"></p>
+      <div id="analysisBody" data-role="body">
+        <div class="metric-grid" id="summaryCards" data-role="summary"></div>
+        <p class="calib-line" id="calibLine" data-role="calib"></p>
 
         <div class="table-wrap">
-          <table class="rep-table" id="repTable">
+          <table class="rep-table" id="repTable" data-role="repTable">
             <thead>
               <tr>
                 <th>Rep</th><th>Duration (s)</th><th>ROM (m)</th>
@@ -218,7 +222,7 @@
         </div>
 
         <div class="chart-wrap">
-          <canvas id="velChart" height="260"></canvas>
+          <canvas id="velChart" height="260" data-role="chart"></canvas>
           <div class="legend">
             <span class="item"><span class="swatch line" style="background:var(--accent)"></span> Vertical velocity (positive = up)</span>
             <span class="item"><span class="swatch" style="background:var(--phase-up-band)"></span> Concentric</span>
@@ -226,7 +230,7 @@
           </div>
         </div>
       </div>
-      <p class="notice warn hidden" id="analysisWarn"></p>
+      <p class="notice warn hidden" id="analysisWarn" data-role="warn"></p>
     </div>
   </section>
 
@@ -236,6 +240,7 @@
   VBT Studio — internal debug &amp; visualisation tool.
 </footer>
 
+<script src="{{ url_for('static', filename='js/analysis-view.js') }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

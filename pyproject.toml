@@ -24,4 +24,5 @@ include = ["vbt_core*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+pythonpath = ["."]   # so tests can `import webapp.app` (webapp isn't pip-installed)
 filterwarnings = ["ignore::DeprecationWarning"]

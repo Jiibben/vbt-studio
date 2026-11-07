@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VBT Studio — bulk import</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+
+<!-- ============================== Header ============================== -->
+<header class="site-header">
+  <div class="brand">
+    <div class="brand-mark" aria-hidden="true">V</div>
+    <div class="brand-text">
+      <span class="brand-name">VBT Studio</span>
+      <span class="brand-tag">Barbell velocity tracking</span>
+    </div>
+  </div>
+  <div class="header-spacer"></div>
+  <nav class="header-nav">
+    <a class="nav-link" href="{{ url_for('index') }}">Single clip</a>
+    <a class="nav-link is-active" href="{{ url_for('batch.batch_page') }}">Bulk import</a>
+  </nav>
+  <span class="header-badge">Sessions</span>
+</header>
+
+<!-- =============================== Hero =============================== -->
+<section class="hero">
+  <h1>Import a whole session.</h1>
+  <p>
+    Drop in every set from a workout, preview each clip to be sure it's the right
+    one, arrange them into exercises, then process the lot in the background.
+    Outputs save to <code>data/tracked/&lt;session&gt;/</code>.
+  </p>
+</section>
+
+<main>
+
+  <!-- ===================== 1 · Import & defaults ===================== -->
+  <section class="card">
+    <div class="card-head">
+      <span class="step">1</span>
+      <h2>Import &amp; defaults</h2>
+      <span class="sub">Pick many clips, set batch defaults</span>
+    </div>
+    <div class="card-body">
+      <div class="grid cols-2">
+        <div>
+          <label class="field-label" for="sessionTitle">Session title</label>
+          <input id="sessionTitle" type="text" placeholder="e.g. Leg day" value="">
+        </div>
+        <div>
+          <label class="field-label" for="files">Video files</label>
+          <input id="files" type="file" accept="video/*" multiple>
+        </div>
+      </div>
+
+      <div id="dropzone" class="dropzone">
+        Drop videos here, or use the picker above.
+      </div>
+
+      <details class="plate-editor" open style="margin-top:var(--s-4);">
+        <summary>
+          <span class="chev" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="9 18 15 12 9 6"/></svg>
+          </span>
+          Batch defaults
+          <span class="summary-sub">— applied to every set unless overridden</span>
+        </summary>
+
+        <div class="grid cols-3" style="margin-top:var(--s-4);">
+          <div>
+            <label class="field-label" for="model">Model weights</label>
+            <select id="model">
+              {% for m in models %}
+              <option value="{{ m }}" {% if m == default_model %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="field-label" for="plate">Default plate (calibration)</label>
+            <select id="plate">
+              {% for kg in ["25", "20", "15", "10", "5", "2.5"] %}
+              <option value="{{ kg }}" {% if kg == "20" %}selected{% endif %}>{{ kg }} kg — {{ plate_config[kg]|round(0)|int }} mm</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="field-label" for="conf">Min confidence</label>
+            <div class="slider-row">
+              <input id="conf" type="range" min="0" max="1" step="0.05" value="0.25">
+              <span class="slider-val" id="confVal">0.25</span>
+            </div>
+          </div>
+          <div>
+            <label class="field-label" for="trailStyle">Trail style</label>
+            <select id="trailStyle">
+              <option value="green" selected>Green only</option>
+              <option value="phase">Phase colours</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label" for="repStyle">Default rep structure</label>
+            <select id="repStyle">
+              <option value="auto" selected>Auto</option>
+              <option value="down-first">Eccentric first — squat, bench…</option>
+              <option value="up-first">Concentric first — deadlift, row…</option>
+            </select>
+          </div>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ===================== 2 · Arrange sets ===================== -->
+  <section class="card hidden" id="arrangeCard">
+    <div class="card-head">
+      <span class="step">2</span>
+      <h2>Arrange &amp; verify</h2>
+      <span class="sub">Preview each clip, group into exercises</span>
+    </div>
+    <div class="card-body">
+      <div class="exercise-bar">
+        <span class="field-label" style="margin:0;">Exercises:</span>
+        <span id="exerciseChips" class="exercise-chips"></span>
+        <button class="btn btn-ghost btn-sm" id="addExercise" type="button">+ Add exercise</button>
+      </div>
+
+      <div id="setGrid" class="set-grid"></div>
+
+      <div class="run-row">
+        <button class="btn btn-primary btn-lg" id="process" type="button">
+          &#9658;&nbsp; Process all sets
+        </button>
+        <div id="status" class="status"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 3 · Session review ===================== -->
+  <section class="card hidden" id="reviewCard">
+    <div class="card-head">
+      <span class="step">3</span>
+      <h2>Session review</h2>
+      <span class="sub">Per-set results, grouped by exercise</span>
+    </div>
+    <div class="card-body">
+      <div id="review"></div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  VBT Studio — internal debug &amp; visualisation tool.
+</footer>
+
+<script src="{{ url_for('static', filename='js/analysis-view.js') }}"></script>
+<script src="{{ url_for('static', filename='js/batch.js') }}"></script>
+</body>
+</html>
