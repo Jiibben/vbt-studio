@@ -57,3 +57,6 @@ node_modules/
 *.keystore
 *.jks
 .aider*
+
+# ── TFLite export calibration sample (auto-downloaded by the exporter, not our data) ──
+calibration_image_sample_data_*.npy
