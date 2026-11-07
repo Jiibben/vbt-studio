@@ -1,104 +1,84 @@
-# VBT Training Project
+# VBT Studio
 
-Barbell-plate detection & tracking for **velocity-based training (VBT)**. A phone
-video of a lift becomes per-rep velocity metrics: detect the plate, track the
-camera-side plate through the lift, calibrate pixels→metres from the known plate
-diameter, segment reps and compute mean/peak concentric velocity and
-velocity-loss %.
+**Barbell velocity from a phone video.** Film a lift, get the speed of every rep, with no sensor on the bar.
 
-> **New here?** Read [`CLAUDE.md`](CLAUDE.md) for the architecture at a glance and
-> [`tech_stack.md`](tech_stack.md) for the full pipeline / model audit.
+Velocity-based training (VBT) uses bar speed to steer training load: how fast you move a weight tells you how close you are to your limit. VBT Studio measures that speed with computer vision alone.
 
-## Architecture
+## What it does
 
-The computer-vision **engine** and the **web UI** are separate:
+- **Detects** the barbell plate in every frame with a YOLO11n model trained on a custom dataset.
+- **Tracks** the plate through the lift (Kalman filter, Hungarian / IoU association, ByteTrack-style two-stage matching).
+- **Calibrates** pixels to metres from the known plate diameter.
+- **Counts reps** and reports mean and peak concentric velocity and velocity loss for each rep.
+- **Renders** annotated videos (tracked box, bar path, live HUD) and exports the trajectory as CSV and the metrics as JSON.
+- **Web app**: analyse a single clip, or import a whole session and process clips in batch.
 
-- **`vbt_core/`** — the UI-agnostic, unit-tested, pip-installable engine. All
-  detection, tracking, analysis, rendering and config logic lives here.
-  - `detection/` — `Detector` ABC + `YOLODetector` (Ultralytics YOLO11n). The
-    `Detector` interface is the extension point for new backends.
-  - `tracking/` — `KalmanFilter`, IoU/Hungarian/Mahalanobis `association`,
-    `BarTracker` (two-stage ByteTrack-style).
-  - `analysis/` — calibration, `RepCounter`, velocity, trajectory metrics.
-  - `rendering/` — ffmpeg encode/trim + overlay drawing.
-  - `pipeline/` — `TrackingPipeline` (OOP) + `run_tracking()` wrapper.
-  - `config/` — persisted plate diameters.
-- **`webapp/`** — UI only. A thin Flask app (`app.py`) that delegates to
-  `vbt_core`, plus the "VBT Studio" frontend (`templates/` + `static/`).
+## How it works
 
 ```
-vbt_training_project/
-├── vbt_core/      # the engine (detection / tracking / analysis / rendering / pipeline / config)
-├── webapp/        # thin Flask UI + static frontend (no CV logic)
-├── scripts/       # offline data-prep & training CLIs (normalize, ls_to_yolo, train, track)
-├── models/        # trained weights (plate_best.pt default, best.pt); exports gitignored
-├── tests/         # pytest suite
-├── pyproject.toml # packaging (vbt-core) + pytest config
-├── CLAUDE.md      # orientation guide
-└── tech_stack.md  # full pipeline / model / tech-stack audit
+phone video ─► normalize (ffmpeg) ─► YOLO11n detection ─► Kalman tracking ─► px→m calibration
+           ─► rep segmentation ─► velocity (Savitzky–Golay derivative) ─► CSV / JSON + overlay videos
 ```
 
-`data/` (raw/processed/datasets/tracked clips, annotations, runtime
-`plate_config.json`) is **local-only and gitignored** — it is never committed.
-Dates use ISO `YYYY-MM-DD` so session folders sort chronologically.
+All computer-vision logic lives in `vbt_core/`, a UI-agnostic, unit-tested Python package. The Flask web app in `webapp/` only handles uploads and display.
 
-## Setup
+## Detector results
 
-The Python environment lives in `venv/` (ultralytics, torch-cpu, scipy, opencv,
-flask). The engine is installed editable:
+| | Value |
+|---|---|
+| Training data | 3,078 images from 15 videos |
+| Validation data | 463 images from 3 other videos (split by video, never seen in training) |
+| mAP50 / mAP50-95 | 0.995 / 0.884 |
+| Precision / recall | 0.998 / 0.999 |
+| CPU inference | about 63 ms per frame |
+
+The velocity output has not yet been validated against a reference device (linear encoder or commercial app).
+
+## Getting started
+
+Requirements: Python 3.10+, ffmpeg.
 
 ```bash
-venv/bin/pip install -e .          # makes `import vbt_core` work
+python -m venv venv
+venv/bin/pip install -e ".[webapp,test]"
+venv/bin/python webapp/app.py        # then open http://127.0.0.1:5000
 ```
 
-## Run the web UI
+Import a clip, set the trim points, pick the plate weight, and start tracking. Trained weights are included in `models/`.
+
+From the command line:
 
 ```bash
-venv/bin/python webapp/app.py      # then open http://127.0.0.1:5000
+venv/bin/python scripts/track_and_velocity.py --weights models/best.pt --source path/to/lift.mp4
 ```
 
-Import a clip, scrub + set trim in/out points, pick the model and plate weight,
-hit **Start tracking**. It returns two previews — the **boxed track** and a
-**bar-path** view with a live HUD — and saves both videos + the trajectory CSV +
-metrics JSON to `data/tracked/<date>/`.
-
-## Tests
+Run the tests:
 
 ```bash
-venv/bin/python -m pytest          # testpaths = tests/
+venv/bin/python -m pytest
 ```
 
-## Offline data & training workflow
+## Train your own detector
 
-**1. Normalize footage** — drop clips in `data/raw/`, then:
-```bash
-bash scripts/normalize_videos.sh            # uses today's date
-bash scripts/normalize_videos.sh 2026-06-10 # or a specific session date
+1. Normalize raw clips: `bash scripts/normalize_videos.sh`
+2. Label plates in Label Studio and export as JSON.
+3. Build a YOLO dataset: `scripts/ls_to_yolo.py` (interpolates keyframes to per-frame labels).
+4. Train on a GPU (Colab or Kaggle scripts in `scripts/`) and drop `best.pt` into `models/`.
+
+## Project structure
+
 ```
-Output lands in `data/processed/<date>/`; originals move to `data/archive/<date>/`.
-
-**2. Annotate** in Label Studio — import from `data/processed/<date>/`, draw +
-interpolate plate boxes, then **Export → JSON** into `data/annotations/<date>.json`.
-
-**3. Build the YOLO dataset** (interpolates keyframes to per-frame labels):
-```bash
-venv/bin/python scripts/ls_to_yolo.py \
-  --export data/annotations/2026-06-10.json \
-  --videos data/processed/2026-06-10 \
-  --out    data/datasets/plate_v1
+vbt_core/    detection, tracking, analysis, rendering, pipeline, config
+webapp/      Flask app and "VBT Studio" front end (single clip and batch sessions)
+scripts/     data preparation, training and CLI tracking
+models/      trained YOLO weights
+tests/       pytest suite
 ```
 
-**4. Train** on Colab/Kaggle (T4 GPU), then drop the resulting `best.pt` into `models/`.
+More detail: [`tech_stack.md`](tech_stack.md) (full pipeline audit) and [`CLAUDE.md`](CLAUDE.md) (architecture notes used with AI coding agents).
 
-**5. Track / evaluate** a held-out clip from the CLI:
-```bash
-venv/bin/python scripts/track_and_velocity.py \
-  --weights models/best.pt \
-  --source  data/processed/2026-06-10/video_3.mp4
-```
+## Roadmap
 
-## Notes
-- One class: `plate`. Datasets are versioned by folder name (`plate_v1`, `plate_v2`, ...).
-- Heavy HSV augmentation in training is intentional, to generalize to plate
-  colors that weren't labeled (blue/black). Genuinely new conditions still need
-  a few labeled clips.
+- Validate velocity against a linear encoder.
+- Real-time analysis on a phone (a TFLite export already exists).
+- A second sensor: ESP32 + IMU on the bar ([`ideas/esp32-imu-vbt.md`](ideas/esp32-imu-vbt.md)).
