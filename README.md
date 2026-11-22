@@ -2,6 +2,10 @@
 
 **Barbell velocity from a phone video.** Film a lift, get the speed of every rep, with no sensor on the bar.
 
+<p align="center">
+  <img src="docs/demo.gif" alt="A squat tracked by VBT Studio: the bar path is drawn on the plate and the HUD shows the rep count, live velocity and lift phase" width="300">
+</p>
+
 Velocity-based training (VBT) uses bar speed to steer training load: how fast you move a weight tells you how close you are to your limit. VBT Studio measures that speed with computer vision alone.
 
 ## What it does
