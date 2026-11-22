@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "VBT Studio: barbell velocity tracking from a phone video"
+abstract: >-
+  Computer-vision pipeline for velocity-based training: YOLO plate detection,
+  Kalman / Hungarian / ByteTrack-style tracking, pixel-to-metre calibration and
+  per-rep velocity metrics from an ordinary phone video.
+authors:
+  - family-names: Burnier
+    given-names: Allan
+repository-code: "https://github.com/Jiibben/vbt-studio"
+url: "https://github.com/Jiibben/vbt-studio"
+license: AGPL-3.0-only
+version: 0.1.0
+keywords:
+  - velocity-based training
+  - barbell tracking
+  - computer vision
+  - object detection
+  - Kalman filter

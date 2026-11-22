@@ -1,0 +1,51 @@
+VBT Studio
+Copyright (C) 2026 Allan Burnier
+https://github.com/Jiibben/vbt-studio
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License, version 3, as published by
+the Free Software Foundation. It is distributed WITHOUT ANY WARRANTY; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+PURPOSE. The full license text is in the LICENSE file.
+
+
+Attribution (additional term under section 7(b) of the license)
+----------------------------------------------------------------
+
+If you redistribute this work, or a work based on it, or make such a work
+available to users over a network, you must keep this NOTICE file and the
+copyright notices intact, and credit the original project in your
+documentation and in any "about" or legal-notices display of your product:
+
+    Based on VBT Studio by Allan Burnier
+    https://github.com/Jiibben/vbt-studio
+
+If you use this project in research, teaching material or a publication,
+please cite it. The citation metadata is in CITATION.cff.
+
+
+Commercial use
+--------------
+
+Commercial use is allowed under the AGPL-3.0. Its conditions apply: if you
+distribute this software, or let users interact with a modified version over a
+network, you must make the complete corresponding source code of your version
+available to them under the same license.
+
+To use this code under other terms (for example in a closed-source product),
+contact the author through the repository above. A separate agreement with the
+author covers the author's code only; see the third-party section below.
+
+
+Third-party components
+----------------------
+
+This project uses Ultralytics YOLO (https://github.com/ultralytics/ultralytics),
+licensed under the AGPL-3.0. The weights in models/ (plate_best.pt, best.pt)
+were fine-tuned from the Ultralytics YOLO11n pretrained model and are
+distributed under the AGPL-3.0 as well. Using Ultralytics software or these
+weights outside the AGPL-3.0 requires an Ultralytics Enterprise License from
+Ultralytics (https://www.ultralytics.com/license).
+
+Other dependencies (NumPy, SciPy, OpenCV, Flask) are under their own
+permissive licenses.

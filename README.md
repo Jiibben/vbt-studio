@@ -82,3 +82,14 @@ More detail: [`tech_stack.md`](tech_stack.md) (full pipeline audit) and [`CLAUDE
 - Validate velocity against a linear encoder.
 - Real-time analysis on a phone (a TFLite export already exists).
 - A second sensor: ESP32 + IMU on the bar ([`ideas/esp32-imu-vbt.md`](ideas/esp32-imu-vbt.md)).
+
+## License and citation
+
+VBT Studio is released under the [GNU AGPL-3.0](LICENSE). You can use, modify and redistribute it, including commercially, on these conditions:
+
+- **Credit the project.** Keep the copyright notices and the [`NOTICE`](NOTICE) file, and credit "VBT Studio by Allan Burnier" with a link to this repository.
+- **Share your changes.** If you distribute it, or run a modified version as a service that others use, you must publish your source code under the same license.
+
+For closed-source or other commercial terms, open an issue to get in touch. The detector is built on [Ultralytics YOLO](https://github.com/ultralytics/ultralytics), which is also AGPL-3.0, so closed-source use needs an Ultralytics Enterprise License too.
+
+If you use VBT Studio in research or a publication, please cite it with the "Cite this repository" button on GitHub, or the metadata in [`CITATION.cff`](CITATION.cff).
